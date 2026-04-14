@@ -17,6 +17,9 @@ RUN curl -o /usr/local/spark/jars/hadoop-aws-${HADOOP_AWS_VERSION}.jar \
     curl -o /usr/local/spark/jars/aws-java-sdk-bundle-${AWS_SDK_VERSION}.jar \
     https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/${AWS_SDK_VERSION}/aws-java-sdk-bundle-${AWS_SDK_VERSION}.jar
 
+# Install Python dependencies
+RUN pip install kafka-python==2.0.2
+
 # Set the working directory
 WORKDIR /home/jovyan/notebooks
 
