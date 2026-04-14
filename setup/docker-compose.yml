@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  spark-jupyter:
+    build: .
+    container_name: spark_dev
+    ports:
+      - "8888:8888"
+      - "4040:4040"
+    volumes:
+      - ../projects:/home/jovyan/projects
+      - ../notebooks:/home/jovyan/notebooks
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - JUPYTER_TOKEN=spark
+      - NB_USER=jovyan
+      - CHOWN_HOME=yes
+    networks:
+      - spark-network
+
+  minio:
+    image: minio/minio
+    container_name: minio_s3
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=admin
+      - MINIO_ROOT_PASSWORD=password
+    volumes:
+      - ../minio_data:/data
+    command: server /data --console-address ":9001"
+    networks:
+      - spark-network
+
+networks:
+  spark-network:
+    driver: bridge
