@@ -17,11 +17,11 @@ logger = get_logger('Pipeline 5')
 
 spark = get_spark_session()
 
-input_path_3 = spark.conf.get("spark.app.input_path_3")
-input_path_4 = spark.conf.get("spark.app.input_path_4")
-input_path_5 = spark.conf.get("spark.app.input_path_5")
-input_path_6 = spark.conf.get("spark.app.input_path_6")
-input_path_7 = spark.conf.get("spark.app.input_path_7")
+# input_path_3 = spark.conf.get("spark.app.input_path_3")
+# input_path_4 = spark.conf.get("spark.app.input_path_4")
+# input_path_5 = spark.conf.get("spark.app.input_path_5")
+# input_path_6 = spark.conf.get("spark.app.input_path_6")
+# input_path_7 = spark.conf.get("spark.app.input_path_7")
 
 # schema = StructType([
 #     StructField("user_id", IntegerType(), True),
@@ -30,7 +30,7 @@ input_path_7 = spark.conf.get("spark.app.input_path_7")
 #     StructField("timestamp", LongType(), True)
 # ])
 
-df = spark.read.json(input_path_3)
+df = spark.read.parquet("s3a://sampra/output/streaming/finnhub_stock_aggregates")
 
 
 

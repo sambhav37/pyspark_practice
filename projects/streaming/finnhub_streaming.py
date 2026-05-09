@@ -1,23 +1,21 @@
 #!/usr/bin/env python3
 """
-Wikipedia Recent Changes Streaming Processor
+Finnhub Stock Data Streaming Processor
 
-Consumes real Wikimedia edit events from Kafka and processes them with PySpark Structured Streaming.
+Consumes real-time stock trades from Kafka and processes them with PySpark Structured Streaming.
 Performs windowed aggregations and writes to Minio S3 in Parquet format.
 """
-
-# spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.0   wikimedia_streaming.py
 
 import os
 import configparser
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
-    col, from_json, to_timestamp, window, count, abs,
-    when, lit, expr
+    col, from_json, to_timestamp, window, sum, count, avg,
+    min, max, expr
 )
 from pyspark.sql.types import (
-    StructType, StructField, StringType, IntegerType,
-    BooleanType, LongType, TimestampType
+    StructType, StructField, StringType, FloatType,
+    IntegerType, LongType, TimestampType, ArrayType
 )
 
 def get_spark_session(app_name: str) -> SparkSession:
@@ -35,7 +33,7 @@ def get_spark_session(app_name: str) -> SparkSession:
         .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
         .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \
         .config("spark.sql.legacy.timeParserPolicy", "CORRECTED") \
-        .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.4") 
+        .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.4")
 
     # Set all properties from the file
     for section in config.sections():
@@ -51,30 +49,23 @@ def main():
     config.read('properties/spark.properties')
 
     bootstrap_servers = config.get('DEFAULT', 'spark.app.kafka_bootstrap_servers', fallback='kafka:9092')
-    topic = config.get('DEFAULT', 'spark.app.wikimedia_kafka_topic', fallback='wikimedia-edits')
-    checkpoint_dir = config.get('DEFAULT', 'spark.app.wikimedia_checkpoint_dir', fallback='checkpoints/wikimedia_edits_checkpoint')
-    output_path = config.get('DEFAULT', 'spark.app.wikimedia_output_path', fallback='s3a://sampra/output/streaming/wikimedia_page_counts')
+    topic = config.get('DEFAULT', 'spark.app.finnhub_kafka_topic', fallback='finnhub-stocks')
+    checkpoint_dir = config.get('DEFAULT', 'spark.app.finnhub_checkpoint_dir', fallback='checkpoints/finnhub_stocks_checkpoint')
+    output_path = config.get('DEFAULT', 'spark.app.finnhub_output_path', fallback='s3a://sampra/output/streaming/finnhub_stock_aggregates')
 
-    spark = get_spark_session("WikimediaEditStream")
+    spark = get_spark_session("FinnhubStockStream")
 
-    # Define schema for Wikimedia events
-    # Based on https://stream.wikimedia.org/v2/stream/recentchange
+    # Define schema for Finnhub trade events
     schema = StructType([
-        StructField("event_id", LongType(), True),
-        StructField("event_type", StringType(), True),
-        StructField("page_title", StringType(), True),
-        StructField("user", StringType(), True),
+        StructField("symbol", StringType(), True),
+        StructField("price", FloatType(), True),
+        StructField("volume", IntegerType(), True),
         StructField("timestamp", LongType(), True),
         StructField("event_time", StringType(), True),  # ISO format
-        StructField("namespace", IntegerType(), True),
-        StructField("comment", StringType(), True),
-        StructField("bot", BooleanType(), True),
-        StructField("minor", BooleanType(), True),
-        StructField("wiki", StringType(), True),
-        StructField("server_name", StringType(), True),
-        StructField("length_old", IntegerType(), True),
-        StructField("length_new", IntegerType(), True),
-        StructField("edit_size", IntegerType(), True),
+        StructField("conditions", ArrayType(StringType()), True),
+        StructField("trade_id", LongType(), True),
+        StructField("exchange", StringType(), True),
+        StructField("trade_type", StringType(), True),
     ])
 
     # Read from Kafka
@@ -98,41 +89,40 @@ def main():
         to_timestamp(col("event_time"))
     )
 
-    # Filter for main namespace (articles) and non-bot edits
-    filtered_df = processed_df.filter(
-        (col("namespace") == 0) &  # Main namespace
-        (col("bot") == False) &    # Exclude bots
-        (col("event_type") == "edit")  # Only edits
-    )
-
     # Add watermark for late data handling
-    watermarked_df = filtered_df.withWatermark("event_time", "10 minutes")
+    watermarked_df = processed_df.withWatermark("event_time", "3 minutes")
 
-    # Windowed aggregation: count edits per page per 5-minute window
-    windowed_counts = (
+    # Windowed aggregation: aggregate trades per symbol per 5-minute window
+    windowed_aggregates = (
         watermarked_df
         .groupBy(
             window(col("event_time"), "2 minutes"),
-            col("page_title")
+            col("symbol")
         )
         .agg(
-            count("*").alias("edit_count"),
-            count(when(col("minor") == True, 1)).alias("minor_edits"),
-            count(when(col("minor") == False, 1)).alias("major_edits")
+            count("*").alias("trade_count"),
+            sum(col("volume")).alias("total_volume"),
+            avg(col("price")).alias("avg_price"),
+            min(col("price")).alias("min_price"),
+            max(col("price")).alias("max_price"),
+            sum(expr("price * volume")).alias("total_value")  # Approximate dollar volume
         )
         .select(
             col("window.start").alias("window_start"),
             col("window.end").alias("window_end"),
-            col("page_title"),
-            col("edit_count"),
-            col("minor_edits"),
-            col("major_edits")
+            col("symbol"),
+            col("trade_count"),
+            col("total_volume"),
+            col("avg_price"),
+            col("min_price"),
+            col("max_price"),
+            col("total_value")
         )
     )
 
     # Write to Parquet on S3
     parquet_query = (
-        windowed_counts
+        windowed_aggregates
         .writeStream
         .outputMode("append")
         .format("parquet")
@@ -143,7 +133,7 @@ def main():
         .start()
     )
 
-    print("=== Wikimedia Edit Streaming Started ===")
+    print("=== Finnhub Stock Streaming Started ===")
     print(f"Kafka servers: {bootstrap_servers}")
     print(f"Topic: {topic}")
     print(f"Output path: {output_path}")

@@ -5,6 +5,7 @@ Wikipedia Recent Changes Producer
 Reads from the Wikimedia EventStream API and sends events to Kafka.
 Uses Server-Sent Events (SSE) to consume the real-time stream.
 """
+# python wikimedia_producer.py --topic wikimedia-edits --max-events 1000
 
 import json
 import time

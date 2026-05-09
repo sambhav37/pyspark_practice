@@ -6,6 +6,8 @@ from datetime import datetime
 
 from kafka import KafkaProducer
 
+# python kafka_producer.py --topic wikipedia-edits --count 2000 --delay 0.1
+
 PAGE_TITLES = [
     "Apache_Spark",
     "Python",
